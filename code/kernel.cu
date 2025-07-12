@@ -35,6 +35,18 @@ __global__ void check_AMR_face(int *d_if_Face_refinement, const int *d_if_Cell_r
     }
 }
 
+__global__ void update_AMR_refinement_index(int* AMR_index, int* key, int *d_if_refinement, int size)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < size)
+    {
+        if (d_if_refinement[i] == 1)
+        {
+            AMR_index[atomicAdd(&key[i], 1)] = i;
+        }
+    }
+}
+
 __device__ double3 d_add(double3 a, double3 b)
 {
     return double3{ a.x + b.x, a.y + b.y, a.z + b.z };
@@ -45,28 +57,26 @@ __device__ double3 d_divide(double3 a, double b)
     return double3{ a.x / b, a.y / b, a.z / b };
 }
 
-__global__ void update_AMR_point_vertex(int4* AMR_vertex, double3* AMR_point, const double3* point, int *d_if_cell_refinement, const int4 *vertex, int N_cell, int N_point)
+__global__ void update_AMR_point_vertex(const int* d_AMR_cell_index, int4* AMR_vertex, double3* AMR_point, const double3* point, int *d_if_cell_refinement, const int4 *vertex, int N_cell, int N_point, int N_add_cell)
 {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < N_cell)
+    int k = blockIdx.x * blockDim.x + threadIdx.x;
+    if (k < N_add_cell)
     {
-        if (d_if_cell_refinement[i] > 0)
-        {
-            AMR_point[N_point] = d_divide(d_add(point[vertex[i].x], point[vertex[i].y]), 2.0);
-            AMR_point[N_point + 1] = d_divide(d_add(point[vertex[i].x], point[vertex[i].z]), 2.0);
-            AMR_point[N_point + 2] = d_divide(d_add(point[vertex[i].x], point[vertex[i].w]), 2.0);
-            AMR_point[N_point + 3] = d_divide(d_add(point[vertex[i].y], point[vertex[i].z]), 2.0);
-            AMR_point[N_point + 4] = d_divide(d_add(point[vertex[i].y], point[vertex[i].w]), 2.0);
-            AMR_point[N_point + 5] = d_divide(d_add(point[vertex[i].z], point[vertex[i].w]), 2.0);
-            AMR_vertex[i] = int4{ vertex[i].x, N_point, N_point + 1, N_point + 2 };
-            AMR_vertex[N_cell] = int4{ N_point, vertex[i].y, N_point + 3, N_point + 4 };
-            AMR_vertex[N_cell + 1] = int4{ N_point + 1, N_point + 3, vertex[i].z, N_point + 5 };
-            AMR_vertex[N_cell + 2] = int4{ N_point + 2, N_point + 4, N_point + 5, vertex[i].w };
-            AMR_vertex[N_cell + 3] = int4{ N_point, N_point + 3, N_point + 1, N_point + 4 };
-            AMR_vertex[N_cell + 4] = int4{ N_point, N_point + 4, N_point + 1, N_point + 2 };
-            AMR_vertex[N_cell + 5] = int4{ N_point + 1, N_point + 4, N_point + 5, N_point + 2 };
-            AMR_vertex[N_cell + 6] = int4{ N_point + 1, N_point + 3, N_point + 5, N_point + 4 };
-        }
+        int i = d_AMR_cell_index[k];
+        AMR_point[N_point] = d_divide(d_add(point[vertex[i].x], point[vertex[i].y]), 2.0);
+        AMR_point[N_point + 1] = d_divide(d_add(point[vertex[i].x], point[vertex[i].z]), 2.0);
+        AMR_point[N_point + 2] = d_divide(d_add(point[vertex[i].x], point[vertex[i].w]), 2.0);
+        AMR_point[N_point + 3] = d_divide(d_add(point[vertex[i].y], point[vertex[i].z]), 2.0);
+        AMR_point[N_point + 4] = d_divide(d_add(point[vertex[i].y], point[vertex[i].w]), 2.0);
+        AMR_point[N_point + 5] = d_divide(d_add(point[vertex[i].z], point[vertex[i].w]), 2.0);
+        AMR_vertex[i] = int4{ vertex[i].x, N_point, N_point + 1, N_point + 2 };
+        AMR_vertex[N_cell] = int4{ N_point, vertex[i].y, N_point + 3, N_point + 4 };
+        AMR_vertex[N_cell + 1] = int4{ N_point + 1, N_point + 3, vertex[i].z, N_point + 5 };
+        AMR_vertex[N_cell + 2] = int4{ N_point + 2, N_point + 4, N_point + 5, vertex[i].w };
+        AMR_vertex[N_cell + 3] = int4{ N_point, N_point + 3, N_point + 1, N_point + 4 };
+        AMR_vertex[N_cell + 4] = int4{ N_point, N_point + 4, N_point + 1, N_point + 2 };
+        AMR_vertex[N_cell + 5] = int4{ N_point + 1, N_point + 4, N_point + 5, N_point + 2 };
+        AMR_vertex[N_cell + 6] = int4{ N_point + 1, N_point + 3, N_point + 5, N_point + 4 };
     }
 }
 
@@ -199,92 +209,88 @@ __device__ int4 d_map_face_nei_to_own(const int face_type_own, const int face_ty
     return face_nei_to_own;
 }
 
-__global__ void update_AMR_face_in_face(int* AMR_owner, int* AMR_neighbor, const int* d_owner, const int* d_neighbor, const int *d_if_cell_refinement, const int *d_if_face_refinement,
-    const int3* face, const int4 *vertex, const double3 * point, int N_cell, int N_face, int N_inner_face, int AMR_N_add_face_in_inner_face, int AMR_N_add_face_in_cell)
+__global__ void update_AMR_face_in_face(const int *d_AMR_inner_face_index, int* AMR_owner, int* AMR_neighbor, const int* d_owner, const int* d_neighbor, const int *d_if_cell_refinement, const int *d_if_face_refinement,
+    const int3* face, const int4 *vertex, const double3 * point, int N_cell, int N_face, int N_inner_face, int AMR_N_add_face_in_inner_face, int AMR_N_add_face_in_cell, int N_AMR_add_inner_face)
 {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < N_inner_face)
+    int k = blockIdx.x * blockDim.x + threadIdx.x;
+    if (k < N_AMR_add_inner_face)
     {
+        int i = d_AMR_inner_face_index[k];
         int N_start = (i == 0) ? 0 : d_if_face_refinement[i - 1];
-        if (d_if_face_refinement[i] - N_start > 0)
+        int owner_ID = d_owner[i];
+        int neighbor_ID = d_neighbor[i];
+        int N_AMR_face_inner_last = (i == 0) ? N_inner_face : N_inner_face + 3 * d_if_face_refinement[i - 1];
+        bool if_own_AMR = d_if_cell_refinement[owner_ID] > 0 ? 1 : 0;
+        bool if_nei_AMR = d_if_cell_refinement[neighbor_ID] > 0 ? 1 : 0;
+        int f_own_type = d_face_type(face[i], vertex[owner_ID]);
+        int f_nei_type = d_face_type(face[i], vertex[neighbor_ID]);
+
+        if (if_own_AMR == 1 && if_nei_AMR == 1)
         {
-            int owner_ID = d_owner[i];
-            int neighbor_ID = d_neighbor[i];
-            int N_AMR_face_inner_last = (i == 0) ? N_inner_face : N_inner_face + 3 * d_if_face_refinement[i - 1];
-            bool if_own_AMR = d_if_cell_refinement[owner_ID] > 0 ? 1 : 0;
-            bool if_nei_AMR = d_if_cell_refinement[neighbor_ID] > 0 ? 1 : 0;
-            int f_own_type = d_face_type(face[i], vertex[owner_ID]);
-            int f_nei_type = d_face_type(face[i], vertex[neighbor_ID]);
+            int4 own_cell_index = d_cell_index(f_own_type, N_cell, owner_ID);
+            AMR_owner[N_AMR_face_inner_last] = own_cell_index.x;
+            AMR_owner[N_AMR_face_inner_last + 1] = own_cell_index.y;
+            AMR_owner[N_AMR_face_inner_last + 2] = own_cell_index.z;
+            AMR_owner[i] = own_cell_index.w;
 
-            if (if_own_AMR == 1 && if_nei_AMR == 1)
-            {
-                int4 own_cell_index = d_cell_index(f_own_type, N_cell, owner_ID);
-                AMR_owner[N_AMR_face_inner_last] = own_cell_index.x;
-                AMR_owner[N_AMR_face_inner_last + 1] = own_cell_index.y;
-                AMR_owner[N_AMR_face_inner_last + 2] = own_cell_index.z;
-                AMR_owner[i] = own_cell_index.w;
-
-                int4 nei_cell_index = d_cell_index(f_nei_type, N_cell, neighbor_ID);
-                int4 face_nei_to_own = d_map_face_nei_to_own(f_own_type, f_nei_type, vertex[owner_ID], vertex[neighbor_ID], N_AMR_face_inner_last, i);
-                AMR_neighbor[face_nei_to_own.x] = nei_cell_index.x;
-                AMR_neighbor[face_nei_to_own.y] = nei_cell_index.y;
-                AMR_neighbor[face_nei_to_own.z] = nei_cell_index.z;
-                AMR_neighbor[face_nei_to_own.w] = nei_cell_index.w;
-            }
-            else if (if_own_AMR == 1)
-            {
-                int4 own_cell_index = d_cell_index(f_own_type, N_cell, owner_ID);
-                AMR_owner[N_AMR_face_inner_last] = own_cell_index.x;
-                AMR_owner[N_AMR_face_inner_last + 1] = own_cell_index.y;
-                AMR_owner[N_AMR_face_inner_last + 2] = own_cell_index.z;
-                AMR_owner[i] = own_cell_index.w;
-                AMR_neighbor[N_AMR_face_inner_last] = neighbor_ID;
-                AMR_neighbor[N_AMR_face_inner_last + 1] = neighbor_ID;
-                AMR_neighbor[N_AMR_face_inner_last + 2] = neighbor_ID;
-                AMR_neighbor[i] = neighbor_ID;
-            }
-            else if (if_nei_AMR == 1)
-            {
-                int4 nei_cell_index = d_cell_index(f_nei_type, N_cell, neighbor_ID);
-                AMR_neighbor[N_AMR_face_inner_last] = nei_cell_index.x;
-                AMR_neighbor[N_AMR_face_inner_last + 1] = nei_cell_index.y;
-                AMR_neighbor[N_AMR_face_inner_last + 2] = nei_cell_index.z;
-                AMR_neighbor[i] = nei_cell_index.w;
-                AMR_owner[N_AMR_face_inner_last] = owner_ID;
-                AMR_owner[N_AMR_face_inner_last + 1] = owner_ID;
-                AMR_owner[N_AMR_face_inner_last + 2] = owner_ID;
-                AMR_owner[i] = owner_ID;
-            }
+            int4 nei_cell_index = d_cell_index(f_nei_type, N_cell, neighbor_ID);
+            int4 face_nei_to_own = d_map_face_nei_to_own(f_own_type, f_nei_type, vertex[owner_ID], vertex[neighbor_ID], N_AMR_face_inner_last, i);
+            AMR_neighbor[face_nei_to_own.x] = nei_cell_index.x;
+            AMR_neighbor[face_nei_to_own.y] = nei_cell_index.y;
+            AMR_neighbor[face_nei_to_own.z] = nei_cell_index.z;
+            AMR_neighbor[face_nei_to_own.w] = nei_cell_index.w;
         }
+        else if (if_own_AMR == 1)
+        {
+            int4 own_cell_index = d_cell_index(f_own_type, N_cell, owner_ID);
+            AMR_owner[N_AMR_face_inner_last] = own_cell_index.x;
+            AMR_owner[N_AMR_face_inner_last + 1] = own_cell_index.y;
+            AMR_owner[N_AMR_face_inner_last + 2] = own_cell_index.z;
+            AMR_owner[i] = own_cell_index.w;
+            AMR_neighbor[N_AMR_face_inner_last] = neighbor_ID;
+            AMR_neighbor[N_AMR_face_inner_last + 1] = neighbor_ID;
+            AMR_neighbor[N_AMR_face_inner_last + 2] = neighbor_ID;
+            AMR_neighbor[i] = neighbor_ID;
+        }
+        else if (if_nei_AMR == 1)
+        {
+            int4 nei_cell_index = d_cell_index(f_nei_type, N_cell, neighbor_ID);
+            AMR_neighbor[N_AMR_face_inner_last] = nei_cell_index.x;
+            AMR_neighbor[N_AMR_face_inner_last + 1] = nei_cell_index.y;
+            AMR_neighbor[N_AMR_face_inner_last + 2] = nei_cell_index.z;
+            AMR_neighbor[i] = nei_cell_index.w;
+            AMR_owner[N_AMR_face_inner_last] = owner_ID;
+            AMR_owner[N_AMR_face_inner_last + 1] = owner_ID;
+            AMR_owner[N_AMR_face_inner_last + 2] = owner_ID;
+            AMR_owner[i] = owner_ID;
+        }       
     }
 }
 
-__global__ void update_AMR_face_in_cell(int* AMR_owner, int* AMR_neighbor, const int* d_owner, const int* d_neighbor, const int *d_if_cell_refinement, const int *d_if_face_refinement,
-    const int3* face, const int4 *vertex, const double3 * point, int N_cell, int N_face, int N_inner_face, int AMR_N_add_face_in_inner_face, int AMR_N_add_face_in_cell)
+__global__ void update_AMR_face_in_cell(const int* d_AMR_cell_index, int* AMR_owner, int* AMR_neighbor, const int* d_owner, const int* d_neighbor, const int *d_if_cell_refinement, const int *d_if_face_refinement,
+    const int3* face, const int4 *vertex, const double3 * point, int N_cell, int N_face, int N_inner_face, int AMR_N_add_face_in_inner_face, int AMR_N_add_face_in_cell, int N_add_cell)
 {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < N_cell)
+    int k = blockIdx.x * blockDim.x + threadIdx.x;
+    if (k < N_add_cell)
     {
-        if (d_if_cell_refinement[i] > 0)
-        {
-            int N_AMR_face_inner_last = N_inner_face + AMR_N_add_face_in_inner_face;
-            AMR_owner[N_AMR_face_inner_last] = i;
-            AMR_neighbor[N_AMR_face_inner_last] = N_cell + 4;
-            AMR_owner[N_AMR_face_inner_last + 1] = N_cell;
-            AMR_neighbor[N_AMR_face_inner_last + 1] = N_cell + 3;
-            AMR_owner[N_AMR_face_inner_last + 2] = N_cell + 1;
-            AMR_neighbor[N_AMR_face_inner_last + 2] = N_cell + 6;
-            AMR_owner[N_AMR_face_inner_last + 3] = N_cell + 2;
-            AMR_neighbor[N_AMR_face_inner_last + 3] = N_cell + 5;
-            AMR_owner[N_AMR_face_inner_last + 4] = N_cell + 3;
-            AMR_neighbor[N_AMR_face_inner_last + 4] = N_cell + 4;
-            AMR_owner[N_AMR_face_inner_last + 5] = N_cell + 3;
-            AMR_neighbor[N_AMR_face_inner_last + 5] = N_cell + 6;
-            AMR_owner[N_AMR_face_inner_last + 6] = N_cell + 5;
-            AMR_neighbor[N_AMR_face_inner_last + 6] = N_cell + 6;
-            AMR_owner[N_AMR_face_inner_last + 7] = N_cell + 4;
-            AMR_neighbor[N_AMR_face_inner_last + 7] = N_cell + 5;
-        }
+        int i = d_AMR_cell_index[k];
+        int N_AMR_face_inner_last = N_inner_face + AMR_N_add_face_in_inner_face;
+        AMR_owner[N_AMR_face_inner_last] = i;
+        AMR_neighbor[N_AMR_face_inner_last] = N_cell + 4;
+        AMR_owner[N_AMR_face_inner_last + 1] = N_cell;
+        AMR_neighbor[N_AMR_face_inner_last + 1] = N_cell + 3;
+        AMR_owner[N_AMR_face_inner_last + 2] = N_cell + 1;
+        AMR_neighbor[N_AMR_face_inner_last + 2] = N_cell + 6;
+        AMR_owner[N_AMR_face_inner_last + 3] = N_cell + 2;
+        AMR_neighbor[N_AMR_face_inner_last + 3] = N_cell + 5;
+        AMR_owner[N_AMR_face_inner_last + 4] = N_cell + 3;
+        AMR_neighbor[N_AMR_face_inner_last + 4] = N_cell + 4;
+        AMR_owner[N_AMR_face_inner_last + 5] = N_cell + 3;
+        AMR_neighbor[N_AMR_face_inner_last + 5] = N_cell + 6;
+        AMR_owner[N_AMR_face_inner_last + 6] = N_cell + 5;
+        AMR_neighbor[N_AMR_face_inner_last + 6] = N_cell + 6;
+        AMR_owner[N_AMR_face_inner_last + 7] = N_cell + 4;
+        AMR_neighbor[N_AMR_face_inner_last + 7] = N_cell + 5;
     }
 }
 
@@ -421,12 +427,30 @@ void main()
     check_AMR_face << < blocknum_face, threadnum >> > (d_if_face_refinement, d_if_cell_refinement, d_owner, d_neighbor, N_face, N_inner_face);
 
     //Determine new number of points, cells, faces
-    int AMR_N_point = N_point + 6 * thrust::reduce(thrust::device, d_if_cell_refinement, d_if_cell_refinement + N_cell);
-    int AMR_N_cell = N_cell + 7 * thrust::reduce(thrust::device, d_if_cell_refinement, d_if_cell_refinement + N_cell);
-    int AMR_N_add_face_in_inner_face = 3 * thrust::reduce(thrust::device, d_if_face_refinement, d_if_face_refinement + N_inner_face);
-    int AMR_N_add_face_in_cell = 8 * thrust::reduce(thrust::device, d_if_cell_refinement, d_if_cell_refinement + N_cell);
+    int N_AMR_add_cell = thrust::reduce(thrust::device, d_if_cell_refinement, d_if_cell_refinement + N_cell);
+    int N_AMR_add_inner_face = thrust::reduce(thrust::device, d_if_face_refinement, d_if_face_refinement + N_inner_face);
+    int N_AMR_add_face = thrust::reduce(thrust::device, d_if_face_refinement, d_if_face_refinement + N_face);
+    int AMR_N_point = N_point + 6 * N_AMR_add_cell;
+    int AMR_N_cell = N_cell + 7 * N_AMR_add_cell;
+    int AMR_N_add_face_in_inner_face = 3 * N_AMR_add_inner_face;
+    int AMR_N_add_face_in_cell = 8 * N_AMR_add_cell;
     int AMR_N_inner_Face = N_inner_face + AMR_N_add_face_in_inner_face + AMR_N_add_face_in_cell;
-    int AMR_N_Face = AMR_N_inner_Face + (N_face - N_inner_face) + 3 * thrust::reduce(thrust::device, d_if_face_refinement + N_inner_face, d_if_face_refinement + N_face);
+    int AMR_N_Face = AMR_N_inner_Face + (N_face - N_inner_face) + 3 * N_AMR_add_face;
+
+
+    //Construct refinement arrays
+    int* d_AMR_cell_index;
+    int* d_AMR_inner_face_index;
+    int* d_key;
+    cudaStatus = cudaMalloc((void**)&d_AMR_cell_index, N_AMR_add_cell * sizeof(int));
+    cudaStatus = cudaMalloc((void**)&d_AMR_inner_face_index, N_AMR_add_inner_face * sizeof(int));
+    cudaStatus = cudaMalloc((void**)&d_key, sizeof(int));
+
+    thrust::fill(thrust::device, d_key, d_key + 1, 0);
+    update_AMR_refinement_index << < blocknum_cell, threadnum >> > (d_AMR_cell_index, d_key, d_if_cell_refinement, N_cell);
+
+    thrust::fill(thrust::device, d_key, d_key + 1, 0);
+    update_AMR_refinement_index << < blocknum_face, threadnum >> > (d_AMR_inner_face_index, d_key, d_if_face_refinement, N_inner_face);
 
     //Update numbering list
     thrust::inclusive_scan(thrust::device, d_if_face_refinement, d_if_face_refinement + N_face, d_if_face_refinement);
@@ -448,13 +472,13 @@ void main()
     cudaMemcpy(d_AMR_vertex, d_vertex, N_cell * sizeof(int4), cudaMemcpyDeviceToDevice);
 
     //Construct the AMR topology
-    update_AMR_point_vertex << < blocknum_cell, threadnum >> > (d_AMR_vertex, d_AMR_point, d_point, d_if_cell_refinement, d_vertex, N_cell, N_point);
+    update_AMR_point_vertex << < blocknum_cell, threadnum >> > (d_AMR_cell_index, d_AMR_vertex, d_AMR_point, d_point, d_if_cell_refinement, d_vertex, N_cell, N_point, N_AMR_add_cell);
 
-    update_AMR_face_in_face << < blocknum_face, threadnum >> > (d_AMR_owner, d_AMR_neighbor, d_AMR_owner, d_AMR_neighbor, d_if_cell_refinement, d_if_face_refinement,
-        d_face, d_vertex, d_point, N_cell, N_face, N_inner_face, AMR_N_add_face_in_inner_face, AMR_N_add_face_in_cell);
+    update_AMR_face_in_face << < blocknum_face, threadnum >> > (d_AMR_inner_face_index, d_AMR_owner, d_AMR_neighbor, d_AMR_owner, d_AMR_neighbor, d_if_cell_refinement, d_if_face_refinement,
+        d_face, d_vertex, d_point, N_cell, N_face, N_inner_face, AMR_N_add_face_in_inner_face, AMR_N_add_face_in_cell, N_AMR_add_inner_face);
 
-    update_AMR_face_in_cell << < blocknum_cell, threadnum >> > (d_AMR_owner, d_AMR_neighbor, d_AMR_owner, d_AMR_neighbor, d_if_cell_refinement, d_if_face_refinement,
-        d_face, d_vertex, d_point, N_cell, N_face, N_inner_face, AMR_N_add_face_in_inner_face, AMR_N_add_face_in_cell);
+    update_AMR_face_in_cell << < blocknum_cell, threadnum >> > (d_AMR_cell_index, d_AMR_owner, d_AMR_neighbor, d_AMR_owner, d_AMR_neighbor, d_if_cell_refinement, d_if_face_refinement,
+        d_face, d_vertex, d_point, N_cell, N_face, N_inner_face, AMR_N_add_face_in_inner_face, AMR_N_add_face_in_cell, N_AMR_add_cell);
 
     //Copy GPU array to CPU array for visualization
     double3* h_AMR_point = new double3[AMR_N_point];
@@ -493,4 +517,7 @@ void main()
     cudaFree(d_face);
     cudaFree(d_if_cell_refinement);
     cudaFree(d_if_face_refinement);
+    cudaFree(d_AMR_cell_index);
+    cudaFree(d_AMR_inner_face_index);
+    cudaFree(d_key);
 }

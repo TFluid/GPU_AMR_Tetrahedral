@@ -1,22 +1,24 @@
 ﻿  Compiling CUDA source file kernel.cu...
   
   D:\yt\OneDrive\Code\AMR\GPU_AMR_Tetrahedral\code>"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.1\bin\nvcc.exe" -gencode=arch=compute_52,code=\"sm_52,compute_52\" --use-local-env -ccbin "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.29.30133\bin\HostX86\x64" -x cu   -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.1\include" -I"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.1\include"  -G   --keep-dir x64\Debug  -maxrregcount=0   --machine 64 --compile -cudart static  -g  -DWIN32 -DWIN64 -D_DEBUG -D_CONSOLE -D_MBCS -Xcompiler "/EHsc /W3 /nologo /Od /FS /Zi /RTC1 /MDd " -Xcompiler "/Fdx64\Debug\vc142.pdb" -o D:\yt\OneDrive\Code\AMR\GPU_AMR_Tetrahedral\code\x64\Debug\kernel.cu.obj "D:\yt\OneDrive\Code\AMR\GPU_AMR_Tetrahedral\code\kernel.cu" 
-D:\yt\OneDrive\Code\AMR\GPU_AMR_Tetrahedral\code\kernel.cu(319): warning #951-D: return type of function "main" must be "int"
+D:\yt\OneDrive\Code\AMR\GPU_AMR_Tetrahedral\code\kernel.cu(325): warning #951-D: return type of function "main" must be "int"
     void main()
          ^
   
   Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
   
   device_functions.h is an internal header file and must not be used directly.  This file will be removed in a future CUDA release.  Please use cuda_runtime_api.h or cuda_runtime.h instead.
-D:\yt\OneDrive\Code\AMR\GPU_AMR_Tetrahedral\code\kernel.cu(319): warning #951-D: return type of function "main" must be "int"
-    void main()
-         ^
+D:\yt\OneDrive\Code\AMR\GPU_AMR_Tetrahedral\code\kernel.cu(219): warning #177-D: variable "N_start" was declared but never referenced
+            int N_start = (i == 0) ? 0 : d_if_face_refinement[i - 1];
+                ^
   
   Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+  
+D:\yt\OneDrive\Code\AMR\GPU_AMR_Tetrahedral\code\kernel.cu(325): warning #951-D: return type of function "main" must be "int"
+    void main()
+         ^
   
   kernel.cu
-  tmpxft_00009f68_00000000-7_kernel.cudafe1.cpp
+  tmpxft_00008984_00000000-7_kernel.cudafe1.cpp
   device_functions.h is an internal header file and must not be used directly.  This file will be removed in a future CUDA release.  Please use cuda_runtime_api.h or cuda_runtime.h instead.
-    正在创建库 D:\yt\OneDrive\Code\AMR\GPU_AMR_Tetrahedral\code\x64\Debug\TFluid_AMR.lib 和对象 D:\yt\OneDrive\Code\AMR\GPU_AMR_Tetrahedral\code\x64\Debug\TFluid_AMR.exp
-LINK : warning LNK4098: 默认库“LIBCMT”与其他库的使用冲突；请使用 /NODEFAULTLIB:library
   TFluid_AMR.vcxproj -> D:\yt\OneDrive\Code\AMR\GPU_AMR_Tetrahedral\code\x64\Debug\TFluid_AMR.exe
