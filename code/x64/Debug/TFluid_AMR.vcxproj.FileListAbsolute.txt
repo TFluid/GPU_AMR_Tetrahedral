@@ -1,0 +1,2 @@
+D:\yt\OneDrive\Code\AMR_Test\TFluid_AMR\x64\Debug\TFluid_AMR.exe
+D:\yt\OneDrive\Code\AMR\GPU_AMR_Tetrahedral\code\x64\Debug\TFluid_AMR.exe
